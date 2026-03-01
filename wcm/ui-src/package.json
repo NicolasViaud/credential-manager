@@ -1,0 +1,12 @@
+{
+  "name": "wcm-ui",
+  "private": true,
+  "scripts": {
+    "build": "esbuild src/main.ts --bundle --outfile=../cmd/wcm/static/bundle.js --minify",
+    "dev":   "esbuild src/main.ts --bundle --outfile=../cmd/wcm/static/bundle.js --watch"
+  },
+  "devDependencies": {
+    "esbuild": "^0.20.0",
+    "typescript": "^5.4.0"
+  }
+}
