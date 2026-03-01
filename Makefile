@@ -1,6 +1,6 @@
 .PHONY: all wcm proxy ui ui-dev clean
 
-all: ui wcm
+all: ui wcm proxy
 
 ## Build the TypeScript UI (outputs bundle.js into wcm/cmd/wcm/static/)
 ui:
@@ -14,7 +14,9 @@ ui-dev:
 wcm: ui
 	go build -o bin/wcm ./wcm/cmd/wcm/
 
-## Build the D-Bus proxy binary (Linux only)
+## Build the D-Bus proxy binary — always cross-compiled for Linux/amd64
+proxy: export GOOS=linux
+proxy: export GOARCH=amd64
 proxy:
 	go build -o bin/proxy ./proxy/cmd/proxy/
 

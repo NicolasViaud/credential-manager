@@ -41,7 +41,10 @@ web-credential-manager/
 │       └── api/              HTTP handlers and router
 ├── proxy/                    # Phase 2: D-Bus proxy (Linux)
 │   ├── go.mod
-│   └── cmd/proxy/main.go
+│   ├── cmd/proxy/main.go
+│   └── internal/
+│       ├── client/           # WCM REST API HTTP client
+│       └── dbus/             # Secret Service D-Bus handlers
 └── docs/                     # Architecture, API spec, D-Bus spec, security, UI spec
 ```
 
@@ -85,6 +88,39 @@ go run ./wcm/cmd/wcm/
 
 ```bash
 make proxy        # build Go binary → bin/proxy
+```
+
+Run the proxy (requires WCM to be running first):
+
+```bash
+WCM_BASE_URL=http://localhost:8080 OWNER_EMAIL=alice@example.com ./bin/proxy
+```
+
+The proxy logs the approval URL to stderr when a D-Bus caller requests secrets and the
+session is locked. Open the URL in a browser or use the web UI to approve.
+
+| Environment Variable    | Default                      | Description                              |
+|-------------------------|------------------------------|------------------------------------------|
+| `WCM_BASE_URL`          | *(required)*                 | Base URL of the WCM service              |
+| `OWNER_EMAIL`           | *(required)*                 | Injected by CDE platform; WCM user ID   |
+| `WCM_DBUS_NAME`         | `org.freedesktop.secrets`   | D-Bus service name to register           |
+| `WCM_POLL_INTERVAL`     | `500ms`                      | Polling interval while waiting for approval |
+| `WCM_APPROVAL_TIMEOUT`  | `2m`                         | Max wait time for user to approve        |
+
+#### Test with secret-tool
+
+```bash
+# Store a credential
+secret-tool store --label="Test password" service myservice account myaccount
+
+# Retrieve (triggers approval flow if session is locked)
+secret-tool lookup service myservice account myaccount
+
+# List matching credentials
+secret-tool search service myservice
+
+# Delete
+secret-tool clear service myservice account myaccount
 ```
 
 ### Web UI
