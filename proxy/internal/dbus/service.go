@@ -2,10 +2,12 @@ package dbus
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"strings"
 
 	"github.com/godbus/dbus/v5"
-	"github.com/google/uuid"
+	"github.com/godbus/dbus/v5/introspect"
 )
 
 // serviceHandler implements org.freedesktop.Secret.Service.
@@ -16,25 +18,30 @@ type serviceHandler struct{ p *Proxy }
 func (h *serviceHandler) OpenSession(algorithm string, input dbus.Variant) (dbus.Variant, dbus.ObjectPath, *dbus.Error) {
 	if algorithm != "plain" {
 		return dbus.MakeVariant(""), "/", &dbus.Error{
-			Name: "org.freedesktop.Secret.Error.NotSupported",
+			Name: "org.freedesktop.DBus.Error.NotSupported",
 			Body: []interface{}{"only 'plain' algorithm is supported"},
 		}
 	}
 
-	sessID := uuid.New().String()
-	sessPath := dbus.ObjectPath("/org/freedesktop/secrets/session/" + sessID)
+	// D-Bus object path elements may only contain [A-Za-z0-9_].
+	// UUIDs contain hyphens so we use a simple counter instead.
+	id := h.p.sessionID.Add(1)
+	sessPath := dbus.ObjectPath(fmt.Sprintf("/org/freedesktop/secrets/session/s%d", id))
+	sessKey := fmt.Sprintf("s%d", id)
 
-	sh := &sessionHandler{p: h.p, id: sessID}
+	sh := &sessionHandler{p: h.p, id: sessKey}
 	if err := h.p.conn.Export(sh, sessPath, sessionIface); err != nil {
 		log.Printf("[proxy] export session %s: %v", sessPath, err)
 	}
+	if err := h.p.conn.Export(introspect.Introspectable(sessionIntrospectXML), sessPath, introspectIface); err != nil {
+		log.Printf("[proxy] export session introspect %s: %v", sessPath, err)
+	}
 
 	h.p.mu.Lock()
-	h.p.dbSessions[sessID] = true
+	h.p.dbSessions[sessKey] = true
 	h.p.mu.Unlock()
 
 	log.Printf("[proxy] OpenSession → %s", sessPath)
-	// Return an empty-byte variant (no output key material for "plain") and the session path.
 	return dbus.MakeVariant([]byte{}), sessPath, nil
 }
 
@@ -65,13 +72,32 @@ func (h *serviceHandler) SearchItems(attrs map[string]string) ([]dbus.ObjectPath
 	return paths, []dbus.ObjectPath{}, nil
 }
 
-// Unlock triggers the WCM approval flow for the given objects.
-// Blocks until the user approves or the approval timeout expires.
-func (h *serviceHandler) Unlock(objects []dbus.ObjectPath) ([]dbus.ObjectPath, dbus.ObjectPath, *dbus.Error) {
-	if dbErr := h.p.ensureUnlocked("dbus-proxy"); dbErr != nil {
-		return []dbus.ObjectPath{}, "/", dbErr
+// Unlock starts the WCM approval flow for the given objects.
+// Returns a Prompt path immediately; the Prompt emits Completed when the user
+// approves or denies. This avoids the ~25 s D-Bus method-call timeout that
+// would fire if we blocked here waiting for user interaction.
+//
+// D-Bus: Unlock(ao objects) → (ao unlocked, o prompt)
+func (h *serviceHandler) Unlock(sender dbus.Sender, objects []dbus.ObjectPath) ([]dbus.ObjectPath, dbus.ObjectPath, *dbus.Error) {
+	// Filter to objects that are actually lockable (collection or known items).
+	var locked []dbus.ObjectPath
+	for _, obj := range objects {
+		if string(obj) == collectionPath || string(obj) == aliasPath {
+			locked = append(locked, obj)
+			continue
+		}
+		// Include item paths that belong to our collection.
+		if strings.HasPrefix(string(obj), collectionPath+"/") {
+			locked = append(locked, obj)
+		}
 	}
-	return objects, "/", nil
+
+	if len(locked) == 0 {
+		return objects, "/", nil
+	}
+
+	promptPath := h.p.newPrompt(string(sender), locked)
+	return []dbus.ObjectPath{}, promptPath, nil
 }
 
 // Lock immediately locks the WCM session.

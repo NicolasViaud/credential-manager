@@ -37,7 +37,9 @@ func (h *itemHandler) GetSecret(session dbus.ObjectPath) (Secret, *dbus.Error) {
 }
 
 // SetSecret updates this item's secret value (label and attributes are preserved).
-func (h *itemHandler) SetSecret(session dbus.ObjectPath, secret Secret) *dbus.Error {
+// rawSecret is []any — same reason as CreateItem (godbus decodes D-Bus struct IN params as []any).
+func (h *itemHandler) SetSecret(rawSecret []any) *dbus.Error {
+	secret := parseSecret(rawSecret)
 	ctx := context.Background()
 	// Fetch current credential to preserve label and attributes.
 	cred, err := h.p.wcm.GetCredentialNoLock(ctx, h.credID)

@@ -3,12 +3,23 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 
 	"github.com/go-chi/chi/v5"
 )
 
+// userIDParam returns the userId path parameter, always percent-decoded.
+//
+// Chi routes against r.URL.RawPath when present, so the parameter value may be
+// percent-encoded (e.g. "alice%40example.com") even if the caller sent it that
+// way intentionally. Decoding here normalises the userID regardless of whether
+// the client encoded the "@" sign or not.
 func userIDParam(r *http.Request) string {
-	return chi.URLParam(r, "userId")
+	raw := chi.URLParam(r, "userId")
+	if decoded, err := url.PathUnescape(raw); err == nil {
+		return decoded
+	}
+	return raw
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

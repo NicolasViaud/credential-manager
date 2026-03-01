@@ -14,12 +14,16 @@ type collectionHandler struct{ p *Proxy }
 
 // CreateItem creates a new credential in the default collection.
 // When replace is true and an item with identical attributes already exists, it is updated.
+//
+// rawSecret is []any because godbus decodes D-Bus structs as []any when they arrive
+// as IN parameters (see parseSecret in proxy.go).
 func (h *collectionHandler) CreateItem(
 	properties map[string]dbus.Variant,
-	secret Secret,
+	rawSecret []any,
 	replace bool,
 ) (dbus.ObjectPath, dbus.ObjectPath, *dbus.Error) {
 	ctx := context.Background()
+	secret := parseSecret(rawSecret)
 
 	// Extract label and attributes from the D-Bus properties dict.
 	label := ""
@@ -30,8 +34,16 @@ func (h *collectionHandler) CreateItem(
 	}
 	attrs := map[string]string{}
 	if v, ok := properties["org.freedesktop.Secret.Item.Attributes"]; ok {
-		if m, ok := v.Value().(map[string]string); ok {
-			attrs = m
+		switch a := v.Value().(type) {
+		case map[string]string:
+			attrs = a
+		case map[string]any:
+			// godbus may decode a{ss} inside a Variant as map[string]any.
+			for k, val := range a {
+				if s, ok := val.(string); ok {
+					attrs[k] = s
+				}
+			}
 		}
 	}
 	if label == "" {
